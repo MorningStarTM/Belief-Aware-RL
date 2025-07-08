@@ -254,7 +254,7 @@ class Trainer:
             # Save the model if the validation loss decreased
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
-                torch.save(self.model.state_dict(), self.model_save_path)
+                self.model.save(self.model_save_path)
                 logger.info(f"Saved new best model at epoch {epoch} with val_loss={val_loss:.4f}")
 
         self.writer.close()
