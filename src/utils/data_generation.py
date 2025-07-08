@@ -16,7 +16,7 @@ config = {
         'save_model_freq': int(1e5)           # How often to save model
     }
 
-def data_collect():
+def data_collect(n_episodes = 500):
     import pickle
 
     env = PacManEnv()
@@ -27,7 +27,7 @@ def data_collect():
     agent = PPO(state_dim, action_dim, config)
     agent.load("src\\models\\ppo")  # Path where your model was saved
 
-    n_episodes = 500  # Number of rollouts to collect
+      # Number of rollouts to collect
     data = []
 
     for ep in range(n_episodes):
@@ -55,7 +55,7 @@ def data_collect():
         data.append(episode_data)
     
     # Save to disk (optional)
-    with open('src\\data\\ppo_rollout_data.pkl', 'wb') as f:
+    with open('src\\data\\test.pkl', 'wb') as f:
         pickle.dump(data, f)
 
 
