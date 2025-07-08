@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import os
+from src.utils.logger import logger
 
 
 
@@ -35,3 +36,24 @@ class BeliefNet(nn.Module):
         x = self.net(x)
         # Each head outputs [batch, n_actions]
         return [head(x) for head in self.heads]
+    
+
+    def save(self, path):
+        checkpoint = {
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'config': self.config,
+        }
+        torch.save(checkpoint, path)
+
+    def load(self, path):
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Checkpoint {path} not found.")
+
+        checkpoint = torch.load(path, map_location=self.device)
+        self.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # Optionally update config
+        if hasattr(self, 'config') and checkpoint.get('config', None) is not None:
+            self.config = checkpoint['config']
+        logger.info(f"Loaded model and optimizer state from {path}")
