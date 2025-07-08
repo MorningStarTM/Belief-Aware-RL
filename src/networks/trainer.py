@@ -3,6 +3,12 @@ from src.utils.logger import logger
 import os
 import numpy as np
 from datetime import datetime
+import torch
+from src.networks.belief_network import BeliefNet
+from torch.utils.tensorboard import SummaryWriter
+import os
+
+
 
 class Trainer:
     def __init__(self, agent:PPO, env, config):
@@ -157,3 +163,98 @@ class Trainer:
         np.save(os.path.join(self.reward_folder, f"ppo_{self.env_name}_step_rewards.npy"), np.array(self.step_rewards))
         np.save(os.path.join(self.reward_folder, f"ppo_{self.env_name}_episode_rewards.npy"), np.array(self.episode_rewards))
         logger.info(f"Saved step_rewards and episode_rewards to {self.log_dir}")
+
+
+
+
+
+
+class Trainer:
+    def __init__(self, model:BeliefNet, train_loader, val_loader, config, log_dir="runs/beliefnet"):
+        self.model = model
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
+        self.optimizer = model.optimizer
+        self.epochs = config['epochs']
+        self.best_val_loss = float('inf')
+        self.writer = SummaryWriter(log_dir=log_dir)
+        self.global_step = 0
+
+        self.model_save_path = 'src\\models'
+        self.model_save_path = os.path.join(self.model_save_path, 'belief_net.pth')
+
+
+    def train_epoch(self, epoch):
+        self.model.train()
+        total_loss = 0
+        total = 0
+        for states, targets in self.train_loader:
+            states = states.to(self.device)
+            targets = targets.to(self.device)  # shape: [batch, 4]
+
+            outputs = self.model(states)       # list of 4 [batch, n_actions]
+            loss = 0
+            for i in range(4):
+                loss += self.model.loss_fn(outputs[i], targets[:, i])
+            loss = loss / 4
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+            total_loss += loss.item() * states.size(0)
+            total += states.size(0)
+
+            # Log training loss for every batch
+            self.writer.add_scalar("Loss/Train_batch", loss.item(), self.global_step)
+            self.global_step += 1
+
+        avg_loss = total_loss / total
+        self.writer.add_scalar("Loss/Train_epoch", avg_loss, epoch)
+        return avg_loss
+
+    def evaluate(self, epoch):
+        self.model.eval()
+        total_loss = 0
+        total_correct = 0
+        total_samples = 0
+        with torch.no_grad():
+            for states, targets in self.val_loader:
+                states = states.to(self.device)
+                targets = targets.to(self.device)
+                outputs = self.model(states)
+                loss = 0
+                batch_correct = 0
+
+                for i in range(4):
+                    loss += self.model.loss_fn(outputs[i], targets[:, i])
+                    preds = outputs[i].argmax(dim=1)
+                    batch_correct += (preds == targets[:, i]).sum().item()
+
+                loss = loss / 4
+                total_loss += loss.item() * states.size(0)
+                total_correct += batch_correct
+                total_samples += states.size(0) * 4  # 4 heads per sample
+
+        avg_loss = total_loss / total_samples * 4  # because we divide by (N*4)
+        accuracy = total_correct / total_samples
+        self.writer.add_scalar("Loss/Val_epoch", avg_loss, epoch)
+        self.writer.add_scalar("Accuracy/Val_epoch", accuracy, epoch)
+        return avg_loss, accuracy
+
+    def fit(self):
+        logger.info("Starting training for BeliefNet...")
+        for epoch in range(1, self.epochs + 1):
+            train_loss = self.train_epoch(epoch)
+            val_loss, val_acc = self.evaluate(epoch)
+            logger.info(f"Epoch {epoch}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}, Val Accuracy = {val_acc:.4f}")
+
+            # Save the model if the validation loss decreased
+            if val_loss < self.best_val_loss:
+                self.best_val_loss = val_loss
+                torch.save(self.model.state_dict(), self.model_save_path)
+                logger.info(f"Saved new best model at epoch {epoch} with val_loss={val_loss:.4f}")
+
+        self.writer.close()
