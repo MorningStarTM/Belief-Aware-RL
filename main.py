@@ -50,7 +50,7 @@ config = {
     'input_dim': len(all_states[0]),
     'hidden_dim': 64,
     'output_dim': 5,         # e.g., 5 actions per ghost
-    'learning_rate': 1e-5,
+    'learning_rate': 1e-6,
     'epochs':5,
 }
 
