@@ -39,9 +39,7 @@ class BeliefAwareActorCritic(nn.Module):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 
         self.actor = nn.Sequential(
-                        nn.Linear(state_dim+ghost, 512),
-                        nn.Tanh(),
-                        nn.Linear(512, 256),
+                        nn.Linear(state_dim+ghost, 256),
                         nn.Tanh(),
                         nn.Linear(256, 64),
                         nn.Tanh(),
@@ -53,9 +51,7 @@ class BeliefAwareActorCritic(nn.Module):
 
         # critic
         self.critic = nn.Sequential(
-                        nn.Linear(state_dim+ghost, 512),
-                        nn.Tanh(),
-                        nn.Linear(512, 256),
+                        nn.Linear(state_dim+ghost, 256),
                         nn.Tanh(),
                         nn.Linear(256, 128),
                         nn.Tanh(),
@@ -70,7 +66,7 @@ class BeliefAwareActorCritic(nn.Module):
         raise NotImplementedError
     
     def act(self, state, ghost_belief):
-        state = torch.cat((state, ghost_belief), dim=-1)
+        state = torch.cat([state, ghost_belief], dim=-1)  # [1, 456]
         action_probs = self.actor(state)
         dist = Categorical(action_probs)
 
@@ -81,7 +77,7 @@ class BeliefAwareActorCritic(nn.Module):
     
     
     def evaluate(self, state, ghost_belief, action):
-        state = torch.cat((state, ghost_belief), dim=-1)
+        state = torch.cat([state, ghost_belief], dim=-1)
         action_probs = self.actor(state)
         dist = Categorical(action_probs)
         action_logprobs = dist.log_prob(action)
@@ -126,11 +122,17 @@ class BeliefAwarePPO:
     def select_action(self, state, ghost_belief):
 
         with torch.no_grad():
-            state = torch.FloatTensor(state).to(self.device)
-            action, action_logprob, state_val = self.policy_old.act(state, ghost_belief)
+            state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+
+            belief_probs = [F.softmax(logits, dim=-1) for logits in ghost_belief] 
+            belief_vector = torch.cat(belief_probs, dim=-1).squeeze(0)
+            if belief_vector.dim() == 1:
+                belief_vector = belief_vector.unsqueeze(0) # [1, 20]
+
+            action, action_logprob, state_val = self.policy_old.act(state, belief_vector)
             
             self.buffer.states.append(state)
-            self.buffer.ghost_belief.append(ghost_belief)
+            self.buffer.ghost_belief.append(belief_vector.detach().clone())
             self.buffer.actions.append(action)
             self.buffer.logprobs.append(action_logprob)
             self.buffer.state_values.append(state_val)

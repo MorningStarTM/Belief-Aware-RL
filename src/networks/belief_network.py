@@ -37,6 +37,22 @@ class BeliefNet(nn.Module):
         # Each head outputs [batch, n_actions]
         return [head(x) for head in self.heads]
     
+    def predict_actions(self, x):
+        """
+        Returns: 
+            actions: Tensor of shape [batch, 4], containing the predicted discrete action index for each ghost.
+        """
+        self.eval()
+        with torch.no_grad():
+            x = torch.tensor(x, dtype=torch.float32).unsqueeze(0).to(self.device)  # [1, state_dim]
+            logits_per_ghost = self.forward(x)  # List of 4 tensors: [batch, n_actions]
+            # For each ghost, take argmax along n_actions -> [batch]
+            actions = [logits.argmax(dim=1) for logits in logits_per_ghost]  # List of [batch] tensors
+            # Stack to [4, batch], then transpose to [batch, 4]
+            actions = torch.stack(actions, dim=0).transpose(0, 1).contiguous()  # [batch, 4]
+        return actions
+
+    
 
     def save(self, path):
         checkpoint = {
