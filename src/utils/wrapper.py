@@ -37,9 +37,21 @@ class RewardShapingWrapper(gym.Wrapper):
                             reward -= 5  # harsh penalty
                         if pacman_pos[0] == ghost_row and pacman_pos[1] == ghost_col:
                             # Pac-Man collides with ghost, and should have known
-                            reward -= 10  # even harsher penalty
+                            reward -= 15  # even harsher penalty
+        
+        # 4. Check collision
+        for ghost in self.ghosts:
+            if self.pacman.rect.colliderect(ghost.rect):
+                reward -= 10
+                self.done = True
+                break
 
-        return obs, reward, done, info
+        # 5. Check win
+        if all(not coin for row in self.coins for coin in row):
+            reward += 10
+            self.done = True
+
+        return obs_to_state(obs), reward, done, info
 
 
 
