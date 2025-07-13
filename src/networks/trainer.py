@@ -1,4 +1,5 @@
 from src.networks.ppo import PPO
+from src.networks.actor_critic import ActorCritic
 from src.networks.belief_aware_rl import BeliefAwarePPO
 from src.utils.logger import logger
 import os
@@ -11,7 +12,7 @@ import os
 
 
 
-class Trainer:
+class PPOTrainer:
     def __init__(self, agent:PPO, env, config):
         
         self.env = env
@@ -41,21 +42,23 @@ class Trainer:
         logger.info("current logging run number for " + self.env_name + " : ", run_num)
         logger.info("logging at : " + self.log_f_name)
 
-        self.directory = "Models"
+        self.directory = "src\\models"
         if not os.path.exists(self.directory):
             os.makedirs(self.directory)
 
-        self.directory = self.directory + '/' + self.env_name + '/'
+        self.directory = self.directory + '/' + 'ppo' + '/'
         if not os.path.exists(self.directory):
             os.makedirs(self.directory)
+        logger.info(f"directory for saving model weights : {self.directory}")
 
-        self.reward_folder = 'rewards'
+        self.reward_folder = 'src\\rewards'
         if not os.path.exists(self.reward_folder):
             os.makedirs(self.reward_folder)
 
-        self.reward_folder = self.reward_folder + '/' + self.env_name + '/'
+        self.reward_folder = self.reward_folder + '/' + 'ppo' + '/'
         if not os.path.exists(self.reward_folder):
             os.makedirs(self.reward_folder)
+        logger.info(f"directory for saving rewards : { self.reward_folder}")
 
 
     def train(self):
@@ -250,8 +253,10 @@ class BeliefAwareTrainer:
             for t in range(1, self.config['max_ep_len']+1):
 
                 # select action with policy
-                obs = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.belief_model.device) #make tensor for belief model
-                ghost_belief = self.belief_model(obs)
+                #obs = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.belief_model.device) #make tensor for belief model
+                #ghost_belief = self.belief_model(obs)
+                ghost_belief = torch.rand(1, 20).to(self.belief_model.device)
+
                 action, *_ = self.agent.select_action(state, ghost_belief)
                 state, reward, done, _, _ = self.env.step(action)
                 self.step_rewards.append(reward)
@@ -326,13 +331,64 @@ class BeliefAwareTrainer:
         logger.info("Total training time  : ", end_time - start_time)
         logger.info("============================================================================================")
 
-        np.save(os.path.join(self.reward_folder, f"belief_aware_ppo_step_rewards.npy"), np.array(self.step_rewards))
-        np.save(os.path.join(self.reward_folder, f"belief_aware_ppo_episode_rewards.npy"), np.array(self.episode_rewards))
+        np.save(os.path.join(self.reward_folder, f"belief_aware_ppo_with_random_step_rewards.npy"), np.array(self.step_rewards))
+        np.save(os.path.join(self.reward_folder, f"belief_aware_ppo_with_random_episode_rewards.npy"), np.array(self.episode_rewards))
         logger.info(f"Saved step_rewards and episode_rewards to {self.log_dir}")
 
 
 
 
+
+
+
+
+
+class ACTrainer:
+    def __init__(self, model:ActorCritic, env, config):
+        self.config = config
+        torch.manual_seed(config['random_seed'])
+        self.model = model
+        self.env = env
+        self.optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'], betas=config['betas'])
+
+
+    def train(self):
+        running_reward = 0
+        for i_episode in range(0, 10000):
+            logger.info(f"Episode : {i_episode}")
+            state, _ = self.env.reset()
+            for t in range(10000):
+                action = self.model(state)
+                state, reward, done, _,_ = self.env.step(action)
+                self.model.rewards.append(reward)
+                running_reward += reward
+                if self.config['render'] and i_episode > 1000:
+                    self.env.render()
+                if done:
+                    break
+            
+            # Updating the policy :
+            self.optimizer.zero_grad()
+            loss = self.model.calculateLoss(self.config['gamma'])
+            loss.backward()
+            self.optimizer.step()        
+            self.model.clearMemory()
+            
+            # saving the model if episodes > 999 OR avg reward > 200 
+            if i_episode % 1000 == 0:
+                self.model.save()    
+           
+            
+            if i_episode % 20 == 0:
+                running_reward = running_reward/20
+                logger.info('Episode {}\tlength: {}\treward: {}'.format(i_episode, t, running_reward))
+                running_reward = 0
+
+        
+
+
+
+####################################################################################################################################
 class Trainer:
     def __init__(self, model:BeliefNet, train_loader, val_loader, config, log_dir="runs/beliefnet"):
         self.model = model
