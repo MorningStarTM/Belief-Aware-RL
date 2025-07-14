@@ -43,12 +43,6 @@ class ActorCritic(nn.Module):
         return action.item()
     
     def calculateLoss(self, gamma=0.99):
-        if not (self.logprobs and self.state_values and self.rewards):
-            logger.error("Warning: Empty memory buffers!")
-            return torch.tensor(0.0, device=self.device)
-        
-
-        # calculating discounted rewards:
         rewards = []
         dis_reward = 0
         for reward in self.rewards[::-1]:
@@ -56,15 +50,14 @@ class ActorCritic(nn.Module):
             rewards.insert(0, dis_reward)
                 
         # normalizing the rewards:
-       
-        rewards = torch.tensor(rewards).to(self.device)
-        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+        rewards = torch.tensor(rewards).to(device=self.device)
+        rewards = (rewards - rewards.mean()) / (rewards.std())
         
         loss = 0
         for logprob, value, reward in zip(self.logprobs, self.state_values, rewards):
             advantage = reward  - value.item()
             action_loss = -logprob * advantage
-            value_loss = F.smooth_l1_loss(value, reward.unsqueeze(0))
+            value_loss = F.smooth_l1_loss(value, reward)
             loss += (action_loss + value_loss)   
         return loss
     
