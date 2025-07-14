@@ -1,6 +1,6 @@
 from src.networks.ppo import PPO
 from src.networks.actor_critic import ActorCritic
-from src.networks.belief_aware_rl import BeliefAwarePPO
+from src.networks.belief_aware_rl import BeliefAwarePPO, BeliefAwareActorCriticAgent
 from src.utils.logger import logger
 import os
 import numpy as np
@@ -253,9 +253,9 @@ class BeliefAwareTrainer:
             for t in range(1, self.config['max_ep_len']+1):
 
                 # select action with policy
-                #obs = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.belief_model.device) #make tensor for belief model
-                #ghost_belief = self.belief_model(obs)
-                ghost_belief = torch.rand(1, 20).to(self.belief_model.device)
+                obs = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.belief_model.device) #make tensor for belief model
+                ghost_belief = self.belief_model(obs)
+                #ghost_belief = torch.rand(1, 20).to(self.belief_model.device)
 
                 action, *_ = self.agent.select_action(state, ghost_belief)
                 state, reward, done, _, _ = self.env.step(action)
@@ -350,23 +350,31 @@ class ACTrainer:
         self.model = model
         self.env = env
         self.optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'], betas=config['betas'])
+        self.episode_rewards = []  
 
 
     def train(self):
         running_reward = 0
-        for i_episode in range(0, 10000):
+        for i_episode in range(0, self.config['episodes']):
             logger.info(f"Episode : {i_episode}")
             state, _ = self.env.reset()
-            for t in range(10000):
+            episode_reward = 0
+
+
+            for t in range(self.config['max_ep_len']):
                 action = self.model(state)
                 state, reward, done, _,_ = self.env.step(action)
                 self.model.rewards.append(reward)
+                episode_reward += reward
                 running_reward += reward
+
+
                 if self.config['render'] and i_episode > 1000:
                     self.env.render()
                 if done:
                     break
             
+            self.episode_rewards.append(episode_reward)  
             # Updating the policy :
             self.optimizer.zero_grad()
             loss = self.model.calculateLoss(self.config['gamma'])
@@ -384,7 +392,71 @@ class ACTrainer:
                 logger.info('Episode {}\tlength: {}\treward: {}'.format(i_episode, t, running_reward))
                 running_reward = 0
 
+        os.makedirs("src\\rewards\\actor_critic", exist_ok=True)
+        np.save(f"src\\rewards\\actor_critic\\actor_critic_ToMPacMan.npy", np.array(self.episode_rewards))
+        logger.info(f"reward saved")
+
         
+
+
+
+
+
+class BeliefAwareACTrainer:
+    def __init__(self, model:BeliefAwareActorCriticAgent, ghost:BeliefNet, env, config):
+        self.config = config
+        torch.manual_seed(config['random_seed'])
+        self.model = model
+        self.ghost = ghost
+        self.env = env
+        self.optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'], betas=config['betas'])
+        self.episode_rewards = []  
+
+
+    def train(self):
+        running_reward = 0
+        for i_episode in range(0, self.config['episodes']):
+            logger.info(f"Episode : {i_episode}")
+            state, _ = self.env.reset()
+            episode_reward = 0
+
+
+            for t in range(self.config['max_ep_len']):
+                ghost_belief = self.ghost(state)
+                action = self.model(state, ghost_belief)
+                state, reward, done, _,_ = self.env.step(action)
+                self.model.rewards.append(reward)
+                episode_reward += reward
+                running_reward += reward
+
+
+                if self.config['render'] and i_episode > 1000:
+                    self.env.render()
+                if done:
+                    break
+            
+            self.episode_rewards.append(episode_reward)  
+            # Updating the policy :
+            self.optimizer.zero_grad()
+            loss = self.model.calculateLoss(self.config['gamma'])
+            loss.backward()
+            self.optimizer.step()        
+            self.model.clearMemory()
+            
+            # saving the model if episodes > 999 OR avg reward > 200 
+            if i_episode % 1000 == 0:
+                self.model.save()    
+           
+            
+            if i_episode % 20 == 0:
+                running_reward = running_reward/20
+                logger.info('Episode {}\tlength: {}\treward: {}'.format(i_episode, t, running_reward))
+                running_reward = 0
+        
+        np.save(f"rewards\\actor_critic\\actor_critic_ToMPacMan.npy", np.array(self.episode_rewards))
+        logger.info(f"reward saved")
+
+
 
 
 
