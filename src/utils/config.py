@@ -4,7 +4,9 @@ actor_config = {
     'lr' : 1e-4,
     'betas' : (0.9, 0.999),
     'random_seed' : 543,
-    'render':False
+    'render':False,
+    'episodes': 1,
+    'max_ep_len':10000
 }
 
 
