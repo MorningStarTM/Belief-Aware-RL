@@ -11,7 +11,7 @@ class RewardShapingWrapper(gym.Wrapper):
 
     def reset(self, **kwargs):
         obs = self.env.reset(**kwargs)
-        return obs_to_state(obs)
+        return obs_to_state(obs), {}
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
@@ -51,7 +51,7 @@ class RewardShapingWrapper(gym.Wrapper):
             reward += 10
             self.done = True
 
-        return obs_to_state(obs), reward, done, info
+        return obs_to_state(obs), reward, done, False, info
 
 
 
