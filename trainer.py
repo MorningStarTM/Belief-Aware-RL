@@ -75,6 +75,8 @@ def actor_critic_trainer():
         'output_dim': 5,         # e.g., 5 actions per ghost
         'learning_rate': 1e-6,
         'epochs':10,
+        'episodes': 1,
+        'max_ep_len':10000
     }
 
     model = BeliefNet(config)
