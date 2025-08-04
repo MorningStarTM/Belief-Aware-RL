@@ -374,6 +374,7 @@ class ACTrainer:
                 if done:
                     break
             
+            logger.info(f"Episode {i_episode} reward: {episode_reward}")  
             self.episode_rewards.append(episode_reward)  
             # Updating the policy :
             self.optimizer.zero_grad()
@@ -422,8 +423,9 @@ class BeliefAwareACTrainer:
 
 
             for t in range(self.config['max_ep_len']):
-                ghost_belief = self.ghost(state)
-                action = self.model(state, ghost_belief)
+                obs = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.ghost.device)
+                ghost_belief = self.ghost(obs)
+                action, aux_loss = self.model(state, ghost_belief)
                 state, reward, done, _,_ = self.env.step(action)
                 self.model.rewards.append(reward)
                 episode_reward += reward
@@ -435,25 +437,28 @@ class BeliefAwareACTrainer:
                 if done:
                     break
             
+            logger.info(f"Episode {i_episode} reward: {episode_reward}")  
             self.episode_rewards.append(episode_reward)  
             # Updating the policy :
             self.optimizer.zero_grad()
             loss = self.model.calculateLoss(self.config['gamma'])
-            loss.backward()
+            total_loss = loss + self.config['loss_weight'] * aux_loss
+            total_loss.backward()
             self.optimizer.step()        
             self.model.clearMemory()
             
             # saving the model if episodes > 999 OR avg reward > 200 
             if i_episode % 1000 == 0:
-                self.model.save()    
+                self.model.save(optimizer=self.optimizer)    
            
             
             if i_episode % 20 == 0:
                 running_reward = running_reward/20
                 logger.info('Episode {}\tlength: {}\treward: {}'.format(i_episode, t, running_reward))
                 running_reward = 0
-        
-        np.save(f"rewards\\actor_critic\\actor_critic_ToMPacMan.npy", np.array(self.episode_rewards))
+                
+        os.makedirs("src\\rewards\\ba_actor_critic", exist_ok=True)
+        np.save(f"src\\rewards\\ba_actor_critic\\ba_actor_critic_ToMPacMan.npy", np.array(self.episode_rewards))
         logger.info(f"reward saved")
 
 
