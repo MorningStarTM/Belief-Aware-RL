@@ -6,6 +6,7 @@ import os
 from src.utils.logger import logger
 from torch.distributions import Categorical
 from datetime import datetime
+from src.networks.belief_network import BeliefNet
 
 
 
@@ -212,18 +213,31 @@ class BeliefAwarePPO:
 
 
 class BeliefAwareActorCriticAgent(nn.Module):
-    def __init__(self, state_dim, ghost_dim, action_dim):
+    def __init__(self, state_dim, ghost_dim, action_dim, config):
         super(BeliefAwareActorCriticAgent, self).__init__()
+        self.config = config
         self.affine = nn.Sequential(
-            nn.Linear(state_dim+ghost_dim, 512),
+            nn.Linear(state_dim, 512),
             nn.ReLU(),
             nn.Linear(512, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
         )
+        logger.info("Affine network created")
+
+        self.belief_net_dub = BeliefNet(config=self.config)
+
+        self.ghost_state = nn.Sequential(
+            nn.Linear(ghost_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64, 128),
+        )
+        logger.info("ghost state network created")
         
-        self.action_layer = nn.Linear(128, action_dim)
-        self.value_layer = nn.Linear(128, 1)
+        self.action_layer = nn.Linear(128 + 128, action_dim)  # note the input size
+        self.value_layer = nn.Linear(128 + 128, 1)
         
         self.logprobs = []
         self.state_values = []
@@ -237,21 +251,34 @@ class BeliefAwareActorCriticAgent(nn.Module):
         belief_probs = [F.softmax(logits, dim=-1) for logits in ghost_belief] 
         belief_vector = torch.cat(belief_probs, dim=-1).squeeze(0)
         if belief_vector.dim() == 1:
-            belief_vector = belief_vector.unsqueeze(0) # [1, 20]
+            belief_vector = belief_vector.unsqueeze(0)  # [1, 20]
 
-        state = torch.cat([state, belief_vector], dim=-1) 
-        state = F.relu(self.affine(state))
-        
-        state_value = self.value_layer(state)
-        
-        action_probs = F.softmax(self.action_layer(state))
+        # FIX: process state and belief separately
+        state_feat = self.affine(state)           # [1, 128]
+        ghost_feat = self.ghost_state(belief_vector) # [1, 128]
+
+        combined = torch.cat([state_feat, ghost_feat], dim=-1)  # [1, 256]
+
+        state_value = self.value_layer(combined)
+        action_probs = F.softmax(self.action_layer(combined), dim=-1)
         action_distribution = Categorical(action_probs)
         action = action_distribution.sample()
         
         self.logprobs.append(action_distribution.log_prob(action))
         self.state_values.append(state_value)
         
-        return action.item()
+        pred_ghost_belief = self.belief_net_dub(state)
+        target = torch.stack([probs.argmax(dim=-1) for probs in belief_probs], dim=1).to(state.device)  # [1, 4]
+
+        # For each ghost, compute cross entropy loss
+        aux_loss = 0
+        for idx, pred_logits in enumerate(pred_ghost_belief):
+            aux_loss += F.cross_entropy(pred_logits, target[:, idx])
+        aux_loss /= len(pred_ghost_belief)
+
+
+        return action.item(), aux_loss
+
     
     def calculateLoss(self, gamma=0.99):
         rewards = []
@@ -278,24 +305,31 @@ class BeliefAwareActorCriticAgent(nn.Module):
         del self.rewards[:]
 
 
-    def save(self, path="src\\models\\actor_critic", file="actor_critic.pth"):
+    def save(self, optimizer, path="src\\models\\ba_actor_critic", file="belief_aware_actor_critic.pth"):
         """
-        Save the model parameters to the specified path.
+        Save the model and optimizer state dicts to the specified path.
         """
         os.makedirs(path, exist_ok=True)
-        torch.save(self.state_dict(), os.path.join(path, file))
-        logger.info(f"Model saved to {path}")
+        save_path = os.path.join(path, file)
+        torch.save({
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+        }, save_path)
+        logger.info(f"Model and optimizer saved to {save_path}")
 
-    def load(self, path="src\\models\\actor_critic", file="actor_critic.pth", map_location=None):
+    def load(self, optimizer, path="src\\models\\ba_actor_critic", file="belief_aware_actor_critic.pth", map_location=None):
         """
-        Load the model parameters from the specified path.
+        Load the model and optimizer state dicts from the specified path.
         """
-        path = os.path.join(path, file)
-        if not os.path.exists(path):
-            logger.error(f"Model file {path} does not exist.")
+        load_path = os.path.join(path, file)
+        if not os.path.exists(load_path):
+            logger.error(f"Model file {load_path} does not exist.")
             return
         device = map_location if map_location is not None else ("cuda" if torch.cuda.is_available() else "cpu")
-        self.load_state_dict(torch.load(path, map_location=device))
-        logger.info(f"Model loaded from {path}")
+        checkpoint = torch.load(load_path, map_location=device)
+        self.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        logger.info(f"Model and optimizer loaded from {load_path}")
+
 
 
